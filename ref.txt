@@ -1,0 +1,6 @@
+git add .
+git commit -m "name"
+git push
+
+git fetch origin
+git reset --hard origin/main
