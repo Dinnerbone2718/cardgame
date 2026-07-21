@@ -35,6 +35,7 @@ UNIT_STATS = {
     "penguin": {"health": 70, "passives": None},
     "spacecat": {"health": 60, "passives": None},
     "demon": {"health": 20, "passives": None},
+    "nevada": {"health": 30, "passives": None}
 }
 
 

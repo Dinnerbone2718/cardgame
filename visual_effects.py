@@ -108,17 +108,115 @@ class ProjectileEffect(CardVisualEffect):
             surface.blit(text_surf, text_rect)
 
 
+class _RainDrop:
+    """A single falling drop tracked by RainEffect."""
+
+    def __init__(self, x, top, bottom, delay):
+        self.start_pos = (x, top)
+        self.end_pos = (x, bottom)
+        self.delay = delay
+        self.positions = []
+
+
+class RainEffect(CardVisualEffect):
+    def __init__(self, game, image_path, source_unit, target_unit,
+                 duration=0.4, size=140, spin_speed=1440,
+                 impact_hold=0.35, trail_length=6,
+                 drop_count=14, spawn_spread=0.6, show_impact_text=False):
+        super().__init__(spawn_spread + duration + impact_hold)
+        self.game = game
+        self.image = _load_image(image_path)
+        self.fly_duration = duration
+        self.impact_hold = impact_hold
+        self.size = size
+        self.spin_speed = spin_speed
+        self.trail_length = trail_length
+        self.spawn_spread = spawn_spread
+        self.show_impact_text = show_impact_text
+
+        width = game.screen.width
+        bottom = game.screen.height
+        self.drops = [
+            _RainDrop(
+                x=random.randint(0, width),
+                top=-50,
+                bottom=bottom,
+                delay=random.uniform(0, spawn_spread),
+            )
+            for _ in range(drop_count)
+        ]
+        self._text_drawn = False
+
+    def _unit_pos(self, unit, fallback):
+        rect = self.game.get_unit_rect(unit)
+        return rect.center if rect else fallback
+
+    def update(self, dt):
+        super().update(dt)
+        for drop in self.drops:
+            local_elapsed = self.elapsed - drop.delay
+            if 0 <= local_elapsed <= self.fly_duration:
+                drop.positions.append(self._current_pos(drop, local_elapsed))
+                if len(drop.positions) > self.trail_length:
+                    drop.positions.pop(0)
+
+    def _current_pos(self, drop, local_elapsed):
+        t = min(1.0, local_elapsed / self.fly_duration) if self.fly_duration > 0 else 1.0
+        x = drop.start_pos[0] + (drop.end_pos[0] - drop.start_pos[0]) * t
+        y = drop.start_pos[1] + (drop.end_pos[1] - drop.start_pos[1]) * t
+        y += math.sin(t * math.pi * 6) * 10
+        return x, y
+
+    def draw(self, surface):
+        self._text_drawn = False
+        for drop in self.drops:
+            local_elapsed = self.elapsed - drop.delay
+            if local_elapsed < 0:
+                continue
+            elif local_elapsed <= self.fly_duration:
+                self._draw_flight(surface, drop)
+            elif local_elapsed <= self.fly_duration + self.impact_hold:
+                self._draw_impact(surface, drop, local_elapsed)
+
+    def _draw_flight(self, surface, drop):
+        positions = drop.positions
+        count = max(1, len(positions))
+        angle = self.elapsed * self.spin_speed
+        for i, pos in enumerate(positions):
+            fade = int(255 * (i + 1) / count)
+            size = int(self.size * (0.5 + 0.5 * (i + 1) / count))
+            img = pygame.transform.smoothscale(self.image, (max(1, size), max(1, size)))
+            img = pygame.transform.rotate(img, angle)
+            img.set_alpha(fade)
+            rect = img.get_rect(center=pos)
+            surface.blit(img, rect)
+
+    def _draw_impact(self, surface, drop, local_elapsed):
+        t = (local_elapsed - self.fly_duration) / self.impact_hold if self.impact_hold else 1.0
+        t = min(1.0, max(0.0, t))
+        wobble = 1 + 0.4 * math.sin(t * math.pi * 10)
+        size = int(self.size * 1.6 * wobble)
+        img = pygame.transform.smoothscale(self.image, (max(1, size), max(1, size)))
+        rect = img.get_rect(center=drop.end_pos)
+        surface.blit(img, rect)
+
+
 CARD_VISUAL_EFFECTS = {
     "explosion": lambda game, source, target: ProjectileEffect(
         game, "assets/fireball.png", source, target,
-        duration=0.7, size=140, spin_speed=0, impact_text="KABLOEYY",
+        duration=0.7, size=140, spin_speed=0, impact_text="KABLOEYY", impact_hold=.6
     ),
 
     "lazer": lambda game, source, target: ProjectileEffect(
         game, "assets/lazer.png", source, target,
         duration=.5, size=140, spin_speed=0, impact_text="ZZZZ", impact_hold=.4, trail_length=20
     ),
-
+    
+    "cuck": lambda game, source, target: RainEffect(
+        game, "assets/lightning.png", source, target,
+        duration=.5, size=140, spin_speed=0, impact_hold=.4, trail_length=5
+    ),
+    
 }
 
 

@@ -11,6 +11,14 @@ class DamageEffect(Effect):
         target.take_damage(self.amount)
 
 
+class DamageAllEffect(Effect):
+    def __init__(self, amount):
+        self.amount = amount
+
+    def apply(self, game, player, source, target):
+        for unit in game.player_team + game.enemy_team:
+            unit.take_damage(self.amount)
+
 class HealEffect(Effect):
     def __init__(self, amount):
         self.amount = amount

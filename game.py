@@ -20,7 +20,7 @@ class Game:
         ]
         self.enemy_team = [
             spawn_unit("demon"),
-            spawn_unit("demon"),
+            spawn_unit("nevada"),
             spawn_unit("demon"),
             spawn_unit("demon")
             ]

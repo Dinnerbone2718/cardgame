@@ -9,11 +9,12 @@ from effects import (
     HealAllEffect,
     DrawTeamEffect,
     SelfDiscardCost,
+    DamageAllEffect
 )
 from visual_effects import spawn_card_effect
 
 
-CARD_NAMES = ["explosion", "field", "hospital", "lazer", "ace", "disk", "carder"]
+CARD_NAMES = ["explosion", "field", "hospital", "lazer", "ace", "disk", "carder", "cuck", "dragon"]
 
 
 def create_card(name):
@@ -88,4 +89,13 @@ _CARD_BUILDERS = {
         cost=[SelfDiscardCost(1)],
         effects=[DrawEffect(3)],
     ),
+    "cuck" : lambda: TurnCard(
+        name="cuck",
+        effects=[DamageAllEffect(10)]
+    ),
+    "dragon" : lambda: TurnCard(
+        name="dragon",
+        effects=[DrawEffect(1), HealEffect(10)]
+    )
+    
 }
