@@ -41,6 +41,9 @@ class TurnCard:
         return all(cost.can_pay(game, player) for cost in self.cost)
 
     def play(self, game, player, target=None, targets=None):
+        if player is not None and player.is_dead:
+            return
+
         for cost in self.cost:
             if not getattr(cost, "interactive", False):
                 cost.pay(game, player)

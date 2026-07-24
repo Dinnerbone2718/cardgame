@@ -93,6 +93,8 @@ class Game:
 
     def get_unit_at(self, pos):
         for unit, rect in self._unit_rects.items():
+            if unit.is_dead:
+                continue
             if rect.collidepoint(pos):
                 return unit
         return None

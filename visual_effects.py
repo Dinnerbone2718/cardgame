@@ -108,8 +108,60 @@ class ProjectileEffect(CardVisualEffect):
             surface.blit(text_surf, text_rect)
 
 
+class HealAllEffect(CardVisualEffect):
+    def __init__(self, game, size=100, travel_duration=0.5, squish_hold=1.4, spawn_spread=0.5):
+        self.game = game
+
+        target_units = game.player_team + game.enemy_team
+
+        super().__init__(spawn_spread + travel_duration + squish_hold)
+
+        self.size = size
+        self.travel_duration = travel_duration
+        self.squish_hold = squish_hold
+        self.spawn_spread = spawn_spread
+
+        self.target_units = target_units
+        self.delays = [random.uniform(0, spawn_spread) for _ in target_units]
+        self.start_pos = (game.screen.width // 2, -50)
+
+        self.image = _load_image("assets/medic.png")
+
+    def draw(self, surface):
+        base_image = pygame.transform.smoothscale(self.image, (self.size, self.size))
+
+        for i, unit in enumerate(self.target_units):
+            local_elapsed = self.elapsed - self.delays[i]
+            if local_elapsed < 0:
+                continue
+
+            rect = self.game.get_unit_rect(unit)
+            if not rect:
+                continue
+            target_x, target_y = rect.center
+
+            if local_elapsed <= self.travel_duration:
+                t = local_elapsed / self.travel_duration if self.travel_duration else 1.0
+                x = HealAllEffect._lerp(self.start_pos[0], target_x, t)
+                y = HealAllEffect._lerp(self.start_pos[1], target_y, t)
+                img_rect = base_image.get_rect(center=(x, y))
+                surface.blit(base_image, img_rect)
+            elif local_elapsed <= self.travel_duration + self.squish_hold:
+                squish_t = (local_elapsed - self.travel_duration) / self.squish_hold if self.squish_hold else 1.0
+                punch = math.sin(squish_t * math.pi)
+                stretch_x = 1 + 0.4 * punch
+                stretch_y = 1 - 0.4 * punch
+                w = max(1, int(self.size * stretch_x))
+                h = max(1, int(self.size * stretch_y))
+                squished_image = pygame.transform.smoothscale(self.image, (w, h))
+                img_rect = squished_image.get_rect(center=(target_x, target_y))
+                surface.blit(squished_image, img_rect)
+
+    def _lerp(a, b, p):
+        return a + p * (b-a)
+
+
 class _RainDrop:
-    """A single falling drop tracked by RainEffect."""
 
     def __init__(self, x, top, bottom, delay):
         self.start_pos = (x, top)
@@ -133,6 +185,7 @@ class RainEffect(CardVisualEffect):
         self.trail_length = trail_length
         self.spawn_spread = spawn_spread
         self.show_impact_text = show_impact_text
+        
 
         width = game.screen.width
         bottom = game.screen.height
@@ -214,8 +267,16 @@ CARD_VISUAL_EFFECTS = {
     
     "cuck": lambda game, source, target: RainEffect(
         game, "assets/lightning.png", source, target,
-        duration=.5, size=140, spin_speed=0, impact_hold=.4, trail_length=5
+        duration=.5, size=140, spin_speed=0, impact_hold=.8, trail_length=5,  show_impact_text= False
     ),
+    
+    "ace": lambda game, source, target: RainEffect(
+        game, "assets/card.png", source, target,
+        duration=.5, size=140, spin_speed=10, impact_hold=0, trail_length=5, show_impact_text= False
+    ),    
+    "hospital": lambda game, source, target: HealAllEffect(
+        game
+    )
     
 }
 

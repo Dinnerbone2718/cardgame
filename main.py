@@ -5,8 +5,8 @@ import game
 
 pygame.init()
 
-SCREEN_WIDTH = 960*1.2
-SCREEN_HEIGHT = 540*1.2
+SCREEN_WIDTH = 960*1.4
+SCREEN_HEIGHT = 540*1.4
 screen = screen.Screen(SCREEN_WIDTH, SCREEN_HEIGHT)
 game = game.Game(screen)
 

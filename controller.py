@@ -57,7 +57,7 @@ class Controller:
 
 
     def run_ai_turn(self):
-        team = self.get_team()
+        team = [unit for unit in self.get_team() if not unit.is_dead]
         if not team:
             return
 
@@ -120,7 +120,10 @@ class Controller:
         if not team:
             return None
         index = math.floor(self.selecter_int) % len(team)
-        return team[index]
+        unit = team[index]
+        if unit.is_dead:
+            return None
+        return unit
 
     def handle_keydown(self, key):
         if not self.player_controlled:
@@ -137,9 +140,14 @@ class Controller:
 
     def move_selection(self, delta):
         team = self.get_team()
-        if not team:
+        if not team or all(unit.is_dead for unit in team):
             return
-        self.target_index = (self.target_index + delta) % len(team)
+        index = self.target_index
+        for _ in range(len(team)):
+            index = (index + delta) % len(team)
+            if not team[index].is_dead:
+                self.target_index = index
+                return
 
     def get_card_size(self):
         width = self.game.screen.width
@@ -156,6 +164,10 @@ class Controller:
         rect = pygame.Rect(0, 0, box_width, box_height)
         rect.center = (width // 2, int(height * 0.42))
         return rect
+
+
+            
+            
 
     def draw_hand(self):
         unit = self.get_selected_unit()
@@ -294,7 +306,8 @@ class Controller:
         if not self.targeting or self.pending_stage >= len(self.pending_specs):
             return []
         team_type = self.pending_specs[self.pending_stage]
-        return self.get_opposing_team() if team_type == "enemy" else self.get_team()
+        team = self.get_opposing_team() if team_type == "enemy" else self.get_team()
+        return [unit for unit in team if not unit.is_dead]
 
     def start_targeting(self, card, unit):
         self.targeting = True
@@ -427,17 +440,32 @@ class Controller:
         else:
             self._finish_playing_card(card, unit)
 
+    def _card_has_targets(self, card):
+        for team_type, _ in card.targeted_effects:
+            pool = self.get_opposing_team() if team_type == "enemy" else self.get_team()
+            if not any(not unit.is_dead for unit in pool):
+                return False
+        return True
+
     def _finish_playing_card(self, card, unit):
+        if unit is None or unit.is_dead:
+            self.pending_end_turn = True
+            return
+
         if card.requires_target:
+            if not self._card_has_targets(card):
+                self.pending_end_turn = True
+                return
+
             if self.player_controlled:
                 self.start_targeting(card, unit)
                 return
             else:
                 targets = []
                 for team_type in (t for t, _ in card.targeted_effects):
-                    pool = self.get_opposing_team() if team_type == "enemy" else self.get_team()
+                    pool = [u for u in (self.get_opposing_team() if team_type == "enemy" else self.get_team()) if not u.is_dead]
                     if not pool:
-                        pool = self.get_team() or self.get_opposing_team()
+                        pool = [u for u in (self.get_team() if team_type == "enemy" else self.get_opposing_team()) if not u.is_dead]
                     targets.append(random.choice(pool))
                 card.play(self.game, unit, targets=targets)
         else:
@@ -531,12 +559,16 @@ class Controller:
         if not team or unit not in team:
             return
 
+        alive_indices = [i for i, u in enumerate(team) if not u.is_dead]
+        if not alive_indices:
+            return
+
         self.ai_phase = "select_unit"
         self.ai_phase_elapsed = 0.0
         self.ai_wander_timer = 0.0
         self.ai_wander_target = None
         self.ai_select_final_unit = unit
-        self.target_index = random.randrange(len(team))
+        self.target_index = random.choice(alive_indices)
 
     def _update_ai_select_unit(self, dt):
         width = self.game.screen.width
@@ -551,7 +583,9 @@ class Controller:
 
         if self.ai_phase_elapsed < 2.4:
             if math.floor(self.ai_phase_elapsed / 0.4) != math.floor((self.ai_phase_elapsed - dt) / 0.4):
-                self.target_index = random.randrange(len(team))
+                alive_indices = [i for i, u in enumerate(team) if not u.is_dead]
+                if alive_indices:
+                    self.target_index = random.choice(alive_indices)
         else:
             self.target_index = team.index(self.ai_select_final_unit)
 
