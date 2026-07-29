@@ -9,7 +9,8 @@ from effects import (
     HealAllEffect,
     DrawTeamEffect,
     SelfDiscardCost,
-    DamageAllEffect
+    DamageAllEffect,
+    Trigger
 )
 from visual_effects import spawn_card_effect
 
@@ -58,6 +59,11 @@ class TurnCard:
         for (team, effect), chosen_target in zip(self.targeted_effects, targets):
             effect.apply(game, player, source=player, target=chosen_target)
             spawn_card_effect(game, self.name, player, chosen_target)
+            if team == "enemy" and isinstance(effect, DamageEffect) and player is not None:
+                player.trigger_passives(game, Trigger.ON_ATTACK, target=chosen_target)
+
+        if player is not None:
+            player.trigger_passives(game, Trigger.ON_PLAY)
 
 
 _CARD_BUILDERS = {

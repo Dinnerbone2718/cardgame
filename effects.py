@@ -1,3 +1,13 @@
+from enum import Enum
+
+
+class Trigger(Enum):
+    ON_PLAY = "on_play"
+    ON_ATTACK = "on_attack"
+    ON_DEATH = "on_death"
+    ON_TURN_START = "on_turn_start"
+
+
 class Effect:
     def apply(self, game, player, source, target):
         pass
@@ -8,7 +18,7 @@ class DamageEffect(Effect):
         self.amount = amount
 
     def apply(self, game, player, source, target):
-        target.take_damage(self.amount)
+        target.take_damage(self.amount, game, source)
 
 
 class DamageAllEffect(Effect):
@@ -17,7 +27,7 @@ class DamageAllEffect(Effect):
 
     def apply(self, game, player, source, target):
         for unit in game.player_team + game.enemy_team:
-            unit.take_damage(self.amount)
+            unit.take_damage(self.amount, game, source)
 
 class HealEffect(Effect):
     def __init__(self, amount):
@@ -97,7 +107,7 @@ class HealthCost(Cost):
 
     def pay(self, game, player):
         unit = player.select_damage_target()
-        unit.take_damage(self.amount)
+        unit.take_damage(self.amount, game, player)
 
 
 class SelfDiscardCost(Cost):

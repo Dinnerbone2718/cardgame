@@ -1,15 +1,9 @@
-from enum import Enum
 import pygame
 from effects import *
 from card import CARD_NAMES, create_card
+from visual_effects import spawn_passive_effect
 import math
 import random
-
-class Trigger(Enum):
-    ON_PLAY = "on_play"
-    ON_ATTACK = "on_attack"
-    ON_DEATH = "on_death"
-    ON_TURN_START = "on_turn_start"
 
 
 class Passive:
@@ -19,32 +13,48 @@ class Passive:
         self.cost = cost if cost is not None else [Cost()]
 
     def can_activate(self, game, unit):
-        if unit.is_dead:
-            return False
-        return all(cost.can_pay(game, unit.controller) for cost in self.cost)
+        return all(cost.can_pay(game, unit) for cost in self.cost)
 
     def activate(self, game, unit, target=None):
         for cost in self.cost:
-            cost.pay(game, unit.controller)
+            cost.pay(game, unit)
 
         for effect in self.effects:
-            effect.apply(game, unit.controller, source=unit, target=target)
+            effect.apply(game, unit, source=unit, target=target)
 
 
 UNIT_STATS = {
-    "blob": {"health": 100, "passives": None},
-    "frog": {"health": 60, "passives": None},
-    "penguin": {"health": 70, "passives": None},
-    "spacecat": {"health": 60, "passives": [HealEffect(10)]},
-    "demon": {"health": 20, "passives": None},
-    "nevada": {"health": 30, "passives": None}
+    "blob": {
+        "health": 100,
+        "passives": [Passive(Trigger.ON_TURN_START, effects=[HealEffect(5)])],
+    },
+    "frog": {
+        "health": 60,
+        "passives": [Passive(Trigger.ON_ATTACK, effects=[DrawEffect(1)])],
+    },
+    "penguin": {
+        "health": 70,
+        "passives": [Passive(Trigger.ON_DEATH, effects=[HealTeamEffect(20)])],
+    },
+    "spacecat": {
+        "health": 60,
+        "passives": [Passive(Trigger.ON_PLAY, effects=[HealEffect(10)])],
+    },
+    "demon": {
+        "health": 20,
+        "passives": [Passive(Trigger.ON_DEATH, effects=[DamageEffect(10)])],
+    },
+    "nevada": {
+        "health": 30,
+        "passives": [Passive(Trigger.ON_TURN_START, effects=[DrawEffect(1)])],
+    },
 }
 
 
 def random_deck():
 
+    #return [create_card("hospital") for _ in range(10)]
     return [create_card(random.choice(CARD_NAMES)) for _ in range(10)]
-
 
 def spawn_unit(name, controller=None):
     stats = UNIT_STATS.get(name, {"health": 1, "passives": None})
@@ -140,6 +150,23 @@ class Unit:
                 rect.centerx = (x-i*10)//2
             surface.blit(image, rect)
 
+        deck_x = (x - 0) // 2 if left else (x + surface.get_width() + 0) // 2
+        deck_y = y
+
+        for anim in self.draw_animations:
+            if anim["elapsed"] < 0:
+                continue
+            t = min(1.0, anim["elapsed"] / anim["duration"]) if anim["duration"] else 1.0
+            ease = 1 - (1 - t) ** 3
+            hand_x = x
+            hand_y = y 
+            cur_x = deck_x + (hand_x - deck_x) * ease
+            cur_y = deck_y + (hand_y - deck_y) * ease
+            travel_image = card_back_image.copy()
+            travel_image.set_alpha(int(255 * ease))
+            rect = travel_image.get_rect(center=(cur_x, cur_y))
+            surface.blit(travel_image, rect)
+
 
 
 
@@ -222,14 +249,29 @@ class Unit:
         if not self.draw_animations:
             self._pending_draw_delay = 0.0
 
-    def take_damage(self, amount):
+    def take_damage(self, amount, game=None, source=None):
         if self.is_dead:
             return
         self.health -= amount
         self.flash_timer = 120
         self.damage_amount = amount
 
+        if self.is_dead and game is not None:
+            self.trigger_passives(game, Trigger.ON_DEATH, target=source)
 
+    def trigger_passives(self, game, trigger, target=None):
+        if self.is_dead and trigger != Trigger.ON_DEATH:
+            return
+
+        actual_target = target if target is not None else self
+
+        for passive in self.passives:
+            if passive.trigger != trigger:
+                continue
+            if not passive.can_activate(game, self):
+                continue
+            passive.activate(game, self, target=actual_target)
+            spawn_passive_effect(game, self, trigger, actual_target)
 
     def heal(self, amount):
         if self.is_dead:

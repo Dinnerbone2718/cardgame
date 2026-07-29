@@ -1,10 +1,14 @@
 import pygame
 import controller
 from units import spawn_unit
+from effects import Trigger
+
+
+DEFAULT_ENEMY_TEAM = ["demon", "demon", "demon", "demon"]
 
 
 class Game:
-    def __init__(self, screen):
+    def __init__(self, screen, enemy_team_names=None):
         self.screen = screen
 
         self.turn = "player"
@@ -18,12 +22,10 @@ class Game:
             spawn_unit("penguin"),
             spawn_unit("spacecat"),
         ]
-        self.enemy_team = [
-            spawn_unit("demon"),
-            spawn_unit("nevada"),
-            spawn_unit("demon"),
-            spawn_unit("demon")
-            ]
+
+        if enemy_team_names is None:
+            enemy_team_names = DEFAULT_ENEMY_TEAM
+        self.enemy_team = [spawn_unit(name) for name in enemy_team_names]
 
         self._unit_rects = {}
         self.visual_effects = []
@@ -53,6 +55,10 @@ class Game:
 
     def end_turn(self):
         self.turn = "enemy" if self.turn == "player" else "player"
+
+        team = self.player_team if self.turn == "player" else self.enemy_team
+        for unit in team:
+            unit.trigger_passives(self, Trigger.ON_TURN_START)
 
     def draw(self):
         self.screen.draw()

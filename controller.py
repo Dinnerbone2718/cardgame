@@ -1,6 +1,7 @@
 import pygame
 import math
 import random
+import statistics
 
 class Controller:
     def __init__(self, game, player_controlled = False):
@@ -57,16 +58,114 @@ class Controller:
 
 
     def run_ai_turn(self):
-        team = [unit for unit in self.get_team() if not unit.is_dead]
-        if not team:
-            return
+        mode = 2
 
-        unit = random.choice(team)
-        self.ai_select_unit(unit)
+        if mode == 1:
+            team = [unit for unit in self.get_team() if not unit.is_dead]
+            if not team:
+                return
 
-        if unit.hand:
-            card = random.choice(unit.hand)
-            self.ai_play_card(card)
+            unit = random.choice(team)
+            self.ai_select_unit(unit)
+
+            if unit.hand:
+                card = random.choice(unit.hand)
+                self.ai_play_card(card)
+
+        if mode == 2:
+            print("New Turn: \n")
+            team = [unit for unit in self.get_team() if not unit.is_dead]
+            if not team:
+                return
+            best_score = None
+            best_unit = None
+            best_card = None
+
+            for unit in team:
+                for card in unit.hand:
+                    score = self._score_outcome(card, unit)
+                    if best_score is None or score > best_score:
+                        best_score = score
+                        best_unit = unit
+                        best_card = card
+
+            if best_unit is not None and best_card is not None:
+                self.ai_select_unit(best_unit)
+                self.ai_play_card(best_card)
+
+
+
+
+    def _get_average_health_perc(self):
+        return statistics.mean([unit.health/unit.max_health for unit in self.get_team() if not unit.is_dead])
+
+    def _get_opposing_health_perc(self):
+        return statistics.mean([unit.health/unit.max_health for unit in self.get_opposing_team() if not unit.is_dead])
+
+    def _get_cards_in_team(self):
+        return sum([len(unit.hand) for unit in self.get_team()])
+
+    def _get_cards_in_opp_team(self):
+        return sum([len(unit.hand) for unit in self.get_opposing_team()])
+
+    def _get_highest_hp_in_team(self):
+        return max(self.get_team(), key=lambda x: x.health).health
+
+
+    def _get_cards_in_hand(self, unit):
+        return len(unit.hand)
+
+    def _score_outcome(self, card, user):
+
+        results = []
+
+        own_alive = [u for u in self.get_team() if not u.is_dead]
+        opp_alive = [u for u in self.get_opposing_team() if not u.is_dead]
+
+        for effect in card.effects:
+            effect_name = effect.__class__.__name__
+
+            if effect_name == "HealAllEffect":
+                results.append(("HealAllEffect", (self._get_opposing_health_perc() - self._get_average_health_perc()) * effect.amount))
+
+            if effect_name == "HealTeamEffect":
+                results.append(("HealTeamEffect", self._get_average_health_perc() * effect.amount))
+
+            if effect_name == "HealEffect":
+                results.append(("HealEffect", (1 - user.health / user.max_health) * effect.amount))
+
+            if effect_name == "DamageEffect":
+                results.append(("DamageEffect", -effect.amount))
+
+            if effect_name == "DamageAllEffect":
+                results.append(("DamageAllEffect", effect.amount * (len(opp_alive) - len(own_alive))))
+
+            if effect_name == "DrawEffect":
+                results.append(("DrawEffect", effect.amount * max(1, (5 - self._get_cards_in_hand(user)))))
+
+            if effect_name == "DrawTeamEffect":
+                results.append(("DrawTeamEffect", effect.amount * max(2, (15 - self._get_cards_in_team()))))
+
+
+        for team, effect in card.targeted_effects:
+            effect_name = effect.__class__.__name__
+            sign = 1 if team == "enemy" else -1
+
+            if effect_name == "DamageEffect":
+                if effect.amount >= self._get_highest_hp_in_team() and sign == -1:
+                    results.append((f"DamageEffect_{team}", -256))
+                else:
+                    results.append((f"DamageEffect_{team}", sign * effect.amount))
+
+
+            if effect_name == "HealEffect":
+                results.append((f"HealEffect_{team}", -sign * effect.amount))
+
+
+        print(f"{user.name}, {card.name} : {sum(value for _, value in results)}")
+
+        return sum(value for _, value in results)
+
 
     def draw(self):
         if self.player_controlled and self.game.turn != "player":
@@ -108,6 +207,10 @@ class Controller:
 
     def get_team(self):
         return self.game.player_team if self.player_controlled else self.game.enemy_team
+    
+    def get_opposing_team(self):
+        return self.game.player_team if not self.player_controlled else self.game.enemy_team
+
 
     def get_opposing_team(self):
         return self.game.enemy_team if self.player_controlled else self.game.player_team
@@ -462,16 +565,45 @@ class Controller:
                 return
             else:
                 targets = []
-                for team_type in (t for t, _ in card.targeted_effects):
+                for team_type, effect in card.targeted_effects:
                     pool = [u for u in (self.get_opposing_team() if team_type == "enemy" else self.get_team()) if not u.is_dead]
                     if not pool:
                         pool = [u for u in (self.get_team() if team_type == "enemy" else self.get_opposing_team()) if not u.is_dead]
-                    targets.append(random.choice(pool))
+                    targets.append(self._choose_ai_target(effect, team_type, pool))
                 card.play(self.game, unit, targets=targets)
         else:
             card.play(self.game, unit)
 
         self.pending_end_turn = True
+
+    def _choose_ai_target(self, effect, team_type, pool):
+        """Pick the best target in `pool` for a given targeted effect.
+
+        - Damage aimed at the enemy team: prefer a target that gets knocked
+          out (the lowest-health unit that the damage would kill); if no
+          target can be killed, hit the lowest-health enemy to press the
+          advantage.
+        - Damage aimed at your own team (friendly fire, e.g. explosion's
+          splash): hit your highest-health ally so a weaker unit isn't put
+          at risk of dying.
+        - Heals default to the lowest-health unit in the pool.
+        """
+        effect_name = effect.__class__.__name__
+
+        if effect_name == "DamageEffect":
+            if team_type == "enemy":
+                killable = [u for u in pool if u.health <= effect.amount]
+                if killable:
+                    # Least overkill among the units we can finish off.
+                    return max(killable, key=lambda u: u.health)
+                return min(pool, key=lambda u: u.health)
+            else:
+                return max(pool, key=lambda u: u.health)
+
+        if effect_name == "HealEffect":
+            return min(pool, key=lambda u: u.health)
+
+        return random.choice(pool)
 
     def update(self, dt=None):
         if dt is None:
