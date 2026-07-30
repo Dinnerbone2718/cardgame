@@ -493,7 +493,7 @@ class Controller:
 
         unit = self.pending_play_unit
         if unit is not None and 0 <= index < len(unit.hand) and unit.hand[index] is card:
-            unit.hand.pop(index)
+            unit.used_cards.append(unit.hand.pop(index))
 
         self.pending_discard_remaining -= 1
 
@@ -514,7 +514,7 @@ class Controller:
     def _play_card_now(self, card, index):
         unit = self.get_selected_unit()
         if unit is not None and 0 <= index < len(unit.hand) and unit.hand[index] is card:
-            unit.hand.pop(index)
+            unit.used_cards.append(unit.hand.pop(index))
 
         interactive_costs = [c for c in card.cost if getattr(c, "interactive", False)]
 
@@ -782,7 +782,7 @@ class Controller:
             self.ai_current_discard_index = None
 
             if unit is not None and card is not None and 0 <= index < len(unit.hand) and unit.hand[index] is card:
-                unit.hand.pop(index)
+                unit.used_cards.append(unit.hand.pop(index))
 
             if self.ai_pending_discards:
                 self._enter_ai_discard_step()

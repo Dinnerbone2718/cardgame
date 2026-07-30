@@ -89,6 +89,7 @@ class Unit:
         self.controller = controller
         self.hand = []
         self.deck = []
+        self.used_cards = []
 
         self._image = None
         self.full_heart = pygame.image.load("assets/full_heart.png").convert_alpha()
@@ -166,6 +167,20 @@ class Unit:
 
         deck_x = (x - 0) // 2 if left else (x + surface.get_width() + 0) // 2
         deck_y = y
+
+
+
+        for i, card in enumerate(self.used_cards):
+
+            image = pygame.transform.scale(card.get_image(), (cb_w, cb_h))
+            rect = image.get_rect(center=(x, y))
+            if left:
+                rect.centerx = (x*1.5+i*10)
+            else:
+                rect.centerx = (x*.85-i*10)
+            surface.blit(image, rect)
+
+
 
         for anim in self.draw_animations:
             if anim["elapsed"] < 0:
