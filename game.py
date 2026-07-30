@@ -8,7 +8,7 @@ DEFAULT_ENEMY_TEAM = ["demon", "demon", "demon", "demon"]
 
 
 class Game:
-    def __init__(self, screen, enemy_team_names=None):
+    def __init__(self, screen, enemy_team_names=None, player_state=None):
         self.screen = screen
 
         self.turn = "player"
@@ -16,12 +16,15 @@ class Game:
         self.player = controller.Controller(self, True)
         self.enemy = controller.Controller(self, False)
 
-        self.player_team = [
-            spawn_unit("blob"),
-            spawn_unit("frog"),
-            spawn_unit("penguin"),
-            spawn_unit("spacecat"),
-        ]
+        if player_state is not None:
+            self.player_team = player_state.build_team()
+        else:
+            self.player_team = [
+                spawn_unit("blob"),
+                spawn_unit("frog"),
+                spawn_unit("penguin"),
+                spawn_unit("spacecat"),
+            ]
 
         if enemy_team_names is None:
             enemy_team_names = DEFAULT_ENEMY_TEAM

@@ -48,6 +48,17 @@ UNIT_STATS = {
         "health": 30,
         "passives": [Passive(Trigger.ON_TURN_START, effects=[DrawEffect(1)])],
     },
+    "snog": {
+        "health": 120,
+        "passives": [Passive(Trigger.ON_TURN_START, effects=[HealEffect(10)])],
+    },
+
+    "booch todd": {
+        "health": 20,
+        "passives": [Passive(Trigger.ON_TURN_START, effects=[DrawEffect(2)])],
+    },
+
+
 }
 
 
@@ -56,10 +67,13 @@ def random_deck():
     #return [create_card("hospital") for _ in range(10)]
     return [create_card(random.choice(CARD_NAMES)) for _ in range(10)]
 
-def spawn_unit(name, controller=None):
+def spawn_unit(name, controller=None, deck=None):
     stats = UNIT_STATS.get(name, {"health": 1, "passives": None})
     unit = Unit(name=name, health=stats["health"], passives=stats["passives"], controller=controller)
-    unit.deck = random_deck()
+    if deck:
+        unit.deck = [create_card(card_name) for card_name in deck]
+    else:
+        unit.deck = random_deck()
     unit.hand.extend(unit.deck[:5])
     del unit.deck[:5]
 

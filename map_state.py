@@ -24,7 +24,11 @@ FIGHT_NODE_TYPES = ("combat", "boss")
 
 
 FIGHT_CONFIGS = {
-    "combat": {"difficulty": 3, "enemy_team": ["demon", "demon", "demon", "demon"]},
+    "combat": {"difficulty": 1, "enemy_team": ["demon", "demon", "demon", "demon"]},
+    "combat": {"difficulty": 2, "enemy_team": ["nevada", "nevada", "demon", "demon"]},
+    "combat": {"difficulty": 3, "enemy_team": ["frog", "frog", "nevada", "nevada"]},
+    "combat": {"difficulty": 4, "enemy_team": ["spacecat", "spacecat", "frog", "frog"]},
+
     "boss": {"difficulty": 3, "enemy_team": ["demon", "demon", "demon", "demon"]},
 }
 DEFAULT_FIGHT_CONFIG = FIGHT_CONFIGS["combat"]
@@ -50,7 +54,7 @@ HINT_FADE = 1.0
 
 
 class MapState:
-    def __init__(self, screen, nodes, start_node, zoom=MAP_ZOOM, on_combat_start=None):
+    def __init__(self, screen, nodes, start_node, zoom=MAP_ZOOM, on_combat_start=None, on_deck_button_click=None):
         self.screen = screen
         self.nodes = nodes
         self.current_node = start_node
@@ -58,6 +62,7 @@ class MapState:
 
 
         self.on_combat_start = on_combat_start
+        self.on_deck_button_click = on_deck_button_click
 
         self._images = {
             node_type: pygame.image.load(path).convert_alpha()
@@ -70,9 +75,11 @@ class MapState:
         self._box_image = pygame.image.load("assets/box.png").convert_alpha()
         self._full_heart_image = pygame.image.load("assets/full_heart.png").convert_alpha()
         self._fight_button_image = pygame.image.load("assets/fight.png").convert_alpha()
+        self._deck_button_image = pygame.image.load("assets/deck.png").convert_alpha()
 
         self._fight_box_rect = None
         self._fight_button_rect = None
+        self._deck_button_rect = None
 
         self._node_rects = {}
         self._bob_timer = 0.0
@@ -143,6 +150,13 @@ class MapState:
 
     def handle_mouseup(self, pos):
         if self._mouse_down_pos is not None and not self._dragging:
+            if self._deck_button_rect is not None and self._deck_button_rect.collidepoint(pos):
+                self._mouse_down_pos = None
+                self._dragging = False
+                if self.on_deck_button_click is not None:
+                    self.on_deck_button_click()
+                return
+
             clicked_node = self._handle_node_click(pos)
             if not clicked_node and self.pending_fight_node is not None:
                 self._handle_fight_prompt_click(pos)
@@ -210,6 +224,15 @@ class MapState:
         self._draw_hand(surface)
         self._draw_hint(surface)
         self._draw_fight_prompt(surface)
+        self._draw_deck_button(surface)
+
+    def _draw_deck_button(self, surface):
+        width = int(self.screen.width * 0.16)
+        height = int(width * (400 / 1000))
+        scaled = pygame.transform.smoothscale(self._deck_button_image, (width, height))
+        rect = scaled.get_rect(topleft=(16, 16))
+        surface.blit(scaled, rect)
+        self._deck_button_rect = rect
 
     def _to_screen(self, x, y):
         world_w, world_h = self._world_size()

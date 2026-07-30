@@ -15,7 +15,7 @@ from effects import (
 from visual_effects import spawn_card_effect
 
 
-CARD_NAMES = ["explosion", "field", "hospital", "lazer", "ace", "disk", "carder", "cuck", "dragon"]
+CARD_NAMES = ["explosion", "field", "hospital", "lazer", "ace", "disk", "carder", "cuck", "dragon", "horse"]
 
 
 def create_card(name):
@@ -105,6 +105,12 @@ _CARD_BUILDERS = {
     "dragon" : lambda: TurnCard(
         name="dragon",
         effects=[DrawEffect(1), HealEffect(10)]
-    )
+    ),
+    "horse" : lambda: TurnCard(
+        name="horse",
+        requires_target=True,
+        effects=[HealEffect(999)],
+        targeted_effects=[("ally", DamageEffect(999))]
+    ),
     
 }
