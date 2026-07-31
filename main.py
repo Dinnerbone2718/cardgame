@@ -45,8 +45,20 @@ player_state = player_state_module.PlayerState()
 def start_combat(node):
     global mode, active_game
     config = map_state.get_fight_config(node)
-    active_game = game_module.Game(screen, enemy_team_names=config.get("enemy_team"), player_state=player_state)
+    active_game = game_module.Game(
+        screen,
+        enemy_team_names=config.get("enemy_team"),
+        player_state=player_state,
+        on_win=end_combat,
+        on_loss=end_combat,
+    )
     mode = "combat"
+
+
+def end_combat():
+    global mode, active_game
+    active_game = None
+    mode = "map"
 
 
 def open_deck_screen():
@@ -99,7 +111,8 @@ while running:
         current_map.draw()
     elif mode == "combat":
         active_game.update(clock)
-        active_game.draw()
+        if active_game is not None:
+            active_game.draw()
     elif mode == "deck":
         deck_screen.draw()
 

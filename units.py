@@ -54,7 +54,7 @@ UNIT_STATS = {
     },
 
     "booch todd": {
-        "health": 20,
+        "health": 200,
         "passives": [Passive(Trigger.ON_TURN_START, effects=[DrawEffect(2)])],
     },
 
@@ -103,6 +103,10 @@ class Unit:
         self.damage_amount = 0
         self.draw_animations = []
         self._pending_draw_delay = 0.0
+
+        self.reshuffle_timer = 0.0
+        self.reshuffle_duration = 0.6
+        self.pending_reshuffle_draws = 0
 
         self._image_scale_cache = None
         self._tombstone_scale_cache = None
@@ -167,6 +171,21 @@ class Unit:
 
         deck_x = (x - 0) // 2 if left else (x + surface.get_width() + 0) // 2
         deck_y = y
+
+        if self.reshuffle_timer > 0:
+            shuffle_t = 1 - (self.reshuffle_timer / self.reshuffle_duration)
+            wobble = math.sin(shuffle_t * math.pi * 8)
+            jitter_x = wobble * 10
+            jitter_y = abs(math.sin(shuffle_t * math.pi * 4)) * 6
+            angle = wobble * 18
+
+            shuffled_image = pygame.transform.rotate(card_back_image, angle)
+            rect1 = shuffled_image.get_rect(center=(deck_x + jitter_x, deck_y - jitter_y))
+            surface.blit(shuffled_image, rect1)
+
+            shuffled_image2 = pygame.transform.rotate(card_back_image, -angle)
+            rect2 = shuffled_image2.get_rect(center=(deck_x - jitter_x * 0.7, deck_y + jitter_y * 0.7))
+            surface.blit(shuffled_image2, rect2)
 
 
 
@@ -256,7 +275,7 @@ class Unit:
 
 
 
-    def update(self, clock):
+    def update(self, clock, game=None):
         self.internal_timer += 1
         t = self.internal_timer / 12  
 
@@ -277,6 +296,29 @@ class Unit:
         self.draw_animations = [a for a in self.draw_animations if a["elapsed"] < a["duration"]]
         if not self.draw_animations:
             self._pending_draw_delay = 0.0
+
+        if self.reshuffle_timer > 0:
+            self.reshuffle_timer -= dt
+            if self.reshuffle_timer <= 0:
+                self.reshuffle_timer = 0.0
+                draws = self.pending_reshuffle_draws
+                self.pending_reshuffle_draws = 0
+                for _ in range(draws):
+                    self.draw_card(game)
+
+        self._check_reshuffle()
+
+    def _check_reshuffle(self):
+        if self.is_dead:
+            return
+        if self.reshuffle_timer > 0 or self.pending_reshuffle_draws > 0:
+            return
+        if not self.hand and not self.deck and self.used_cards:
+            random.shuffle(self.used_cards)
+            self.deck = self.used_cards
+            self.used_cards = []
+            self.reshuffle_timer = self.reshuffle_duration
+            self.pending_reshuffle_draws = 2
 
     def take_damage(self, amount, game=None, source=None):
         if self.is_dead:

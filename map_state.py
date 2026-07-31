@@ -24,10 +24,10 @@ FIGHT_NODE_TYPES = ("combat", "boss")
 
 
 FIGHT_CONFIGS = {
-    "combat": {"difficulty": 1, "enemy_team": ["demon", "demon", "demon", "demon"]},
     "combat": {"difficulty": 2, "enemy_team": ["nevada", "nevada", "demon", "demon"]},
     "combat": {"difficulty": 3, "enemy_team": ["frog", "frog", "nevada", "nevada"]},
     "combat": {"difficulty": 4, "enemy_team": ["spacecat", "spacecat", "frog", "frog"]},
+    "combat": {"difficulty": 1, "enemy_team": ["demon", "demon", "demon", "demon"]},
 
     "boss": {"difficulty": 3, "enemy_team": ["demon", "demon", "demon", "demon"]},
 }

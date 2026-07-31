@@ -4,7 +4,7 @@ from card import CARD_NAMES
 from units import spawn_unit
 
 
-STARTING_TEAM = ["spacecat", "nevada", "booch todd", "snog"]
+STARTING_TEAM = ["spacecat", "spacecat", "spacecat", "spacecat"]
 
 DECK_SIZE = 10
 
