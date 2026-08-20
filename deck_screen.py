@@ -1,3 +1,5 @@
+import math
+
 import pygame
 
 from card import CARD_NAMES, create_card
@@ -7,6 +9,7 @@ from player_state import DECK_SIZE
 _unit_image_cache = {}
 _card_image_cache = {}
 _button_image_cache = {}
+_upgrade_image_cache = {}
 
 
 def _load_unit_image(name):
@@ -27,6 +30,12 @@ def _load_button_image(name):
     return _button_image_cache[name]
 
 
+def _load_upgrade_image(name):
+    if name not in _upgrade_image_cache:
+        _upgrade_image_cache[name] = pygame.image.load(f"upgrade/{name}.png").convert_alpha()
+    return _upgrade_image_cache[name]
+
+
 BUTTON_ASPECT = 300 / 1000
 
 
@@ -36,6 +45,8 @@ COMPLETE_COLOR = (110, 200, 120)
 INCOMPLETE_COLOR = (200, 90, 90)
 TEXT_COLOR = (235, 235, 235)
 DISABLED_COLOR = (90, 90, 100)
+BADGE_COLOR = (255, 215, 80)
+BADGE_TEXT_COLOR = (24, 22, 30)
 
 
 class DeckScreen:
@@ -50,6 +61,7 @@ class DeckScreen:
         self._font = None
         self._small_font = None
         self._title_font = None
+        self._badge_font = None
 
         self._portrait_rects = {}
         self._close_button_rect = None
@@ -63,6 +75,7 @@ class DeckScreen:
             self._font = pygame.font.SysFont("comicsansms", max(14, int(self.screen.height * 0.028)))
             self._small_font = pygame.font.SysFont("comicsansms", max(12, int(self.screen.height * 0.022)))
             self._title_font = pygame.font.SysFont("comicsansms", max(18, int(self.screen.height * 0.04)), bold=True)
+            self._badge_font = pygame.font.SysFont("comicsansms", max(10, int(self.screen.height * 0.016)), bold=True)
         return self._font, self._small_font, self._title_font
 
     def _draw_image_button(self, surface, image_name, anchor, pos, width_frac, disabled=False):
@@ -143,6 +156,52 @@ class DeckScreen:
         else:
             self._draw_edit(surface)
 
+    def _unit_upgrade_icons(self, unit_name):
+        upgrades = self.player_state.get_upgrades(unit_name)
+        icons = []
+
+        if upgrades["extra_heart"]:
+            count = upgrades["extra_heart"]
+            badge = str(count) if count > 1 else None
+            icons.append(("extra_heart", badge))
+
+        if upgrades["extra_card"]:
+            count = upgrades["extra_card"]
+            badge = str(count) if count > 1 else None
+            icons.append(("extra_card", badge))
+
+        if upgrades["glass_cannon"]:
+            icons.append(("glass_cannon", None))
+
+        return icons
+
+    def _draw_upgrade_icons(self, surface, unit_name, center_x, bottom_y, portrait_size):
+        icons = self._unit_upgrade_icons(unit_name)
+        if not icons:
+            return bottom_y
+
+        icon_size = max(1, int(portrait_size * 0.32))
+        margin = int(icon_size * 0.18)
+        total_w = len(icons) * icon_size + (len(icons) - 1) * margin
+        start_x = center_x - total_w // 2
+        y = bottom_y - icon_size
+
+        for i, (upgrade_name, badge) in enumerate(icons):
+            x = start_x + i * (icon_size + margin)
+            image = pygame.transform.smoothscale(_load_upgrade_image(upgrade_name), (icon_size, icon_size))
+            rect = image.get_rect(topleft=(x, y))
+            surface.blit(image, rect)
+
+            if badge is not None:
+                badge_font = self._badge_font
+                badge_text = badge_font.render(badge, True, BADGE_TEXT_COLOR)
+                badge_radius = max(badge_text.get_width(), badge_text.get_height()) // 2 + 4
+                badge_center = (rect.right - badge_radius // 2, rect.bottom - badge_radius // 2)
+                pygame.draw.circle(surface, BADGE_COLOR, badge_center, badge_radius)
+                surface.blit(badge_text, badge_text.get_rect(center=badge_center))
+
+        return y
+
     def _draw_grid(self, surface):
         font, small_font, title_font = self._fonts()
 
@@ -167,6 +226,8 @@ class DeckScreen:
             image = pygame.transform.smoothscale(_load_unit_image(unit_name), (portrait_size, portrait_size))
             rect = image.get_rect(topleft=(x - portrait_size // 2, y))
             border_rect = rect.inflate(20, 20)
+
+            self._draw_upgrade_icons(surface, unit_name, x, border_rect.top - 10, portrait_size)
 
             pygame.draw.rect(surface, PANEL_COLOR, border_rect)
             surface.blit(image, rect)
@@ -239,16 +300,35 @@ class DeckScreen:
 
         card_w = int(self.screen.width * 0.08)
         card_h = int(card_w * 1.3)
-        columns = len(CARD_NAMES)
-        margin = int(self.screen.width * 0.015)
-        total_w = columns * card_w + (columns - 1) * margin
+        margin_x = int(self.screen.width * 0.015)
+        row_gap = int(card_h * 0.28)
+
+
+        usable_w = int(self.screen.width * 0.94)
+        columns = max(1, (usable_w + margin_x) // (card_w + margin_x))
+        columns = min(columns, len(CARD_NAMES))
+        rows = math.ceil(len(CARD_NAMES) / columns)
+
+        total_w = columns * card_w + (columns - 1) * margin_x
         start_x = self.screen.width // 2 - total_w // 2
-        y = top + label.get_height() + 24
+        start_y = top + label.get_height() + 24
+
+        available_h = self.screen.height - start_y - int(self.screen.height * 0.04)
+        needed_h = rows * card_h + (rows - 1) * row_gap
+        if needed_h > available_h and available_h > 0:
+            scale = max(0.4, available_h / needed_h)
+            card_w = max(1, int(card_w * scale))
+            card_h = int(card_w * 1.3)
+            row_gap = int(card_h * 0.28)
+            total_w = columns * card_w + (columns - 1) * margin_x
+            start_x = self.screen.width // 2 - total_w // 2
 
         self._pool_card_rects = []
 
         for i, card_name in enumerate(CARD_NAMES):
-            x = start_x + i * (card_w + margin)
+            row, col = divmod(i, columns)
+            x = start_x + col * (card_w + margin_x)
+            y = start_y + row * (card_h + row_gap)
             rect = pygame.Rect(x, y, card_w, card_h)
 
             remaining = self.player_state.available_count(card_name, exclude_unit=self.selected_unit)

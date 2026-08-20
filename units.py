@@ -26,7 +26,7 @@ class Passive:
 UNIT_STATS = {
     "blob": {
         "health": 100,
-        "passives": [Passive(Trigger.ON_TURN_START, effects=[HealEffect(5)])],
+        "passives": [Passive(Trigger.ON_TURN_START, effects=[HealEffect(10)])],
     },
     "frog": {
         "health": 60,
@@ -52,18 +52,58 @@ UNIT_STATS = {
         "health": 120,
         "passives": [Passive(Trigger.ON_TURN_START, effects=[HealEffect(10)])],
     },
-
     "booch todd": {
         "health": 200,
         "passives": [Passive(Trigger.ON_TURN_START, effects=[DrawEffect(2)])],
     },
+    "constitution": {
+        "health": 40,
+        "passives": [Passive(Trigger.ON_TURN_START, effects=[DrawEffect(3)])],
+    },
+    "weenus fungel": {
+        "health": 40,
+        "passives": [Passive(Trigger.ON_PLAY, effects=[DrawEffect(1)])],
+    }
 
 
 }
 
 
-def random_deck():
+UNIT_POWER = {
+    "blob": 5,
+    "frog": 8,
+    "penguin": 6,
+    "spacecat": 5,
+    "nevada": 7,
+    "snog": 6,
+    "booch todd": 10,
+    "constitution" : 5,
+    "demon": 2,
+    "weenus fungel": 4,
+}
 
+UNIT_SHOP_POOL = ["blob", "frog", "penguin", "nevada", "snog", "booch todd", "constitution", "weenus fungel"]
+
+ENEMY_UNIT_POOL = list(UNIT_POWER.keys())
+
+
+def get_unit_power(name):
+    return UNIT_POWER.get(name, 5)
+
+UNIT_PRICE_MIN = 150
+UNIT_PRICE_MAX = 300
+UNIT_POWER_MIN = 1
+UNIT_POWER_MAX = 10
+
+
+def get_unit_price(name):
+    power = UNIT_POWER.get(name, 5)
+    frac = (power - UNIT_POWER_MIN) / (UNIT_POWER_MAX - UNIT_POWER_MIN)
+    price = UNIT_PRICE_MIN + frac * (UNIT_PRICE_MAX - UNIT_PRICE_MIN)
+    return int(round(price / 10) * 10)
+
+
+def random_deck():
     #return [create_card("hospital") for _ in range(10)]
     return [create_card(random.choice(CARD_NAMES)) for _ in range(10)]
 
@@ -96,6 +136,7 @@ class Unit:
         self.half_heart = pygame.image.load("assets/half_heart.png").convert_alpha()
         self.tombstone_image = pygame.image.load("assets/tombstone.png").convert_alpha()
         self.back_of_card = pygame.image.load("assets/card_back.png").convert_alpha()
+        self.shield_image = pygame.image.load("assets/shield.png").convert_alpha()
         self.stretch_x = 1.0
         self.stretch_y = 1.0
         self.internal_timer = 0
@@ -108,11 +149,19 @@ class Unit:
         self.reshuffle_duration = 0.6
         self.pending_reshuffle_draws = 0
 
+        self.extra_draw_count = 0
+        self.glass_cannon = False
+        self.vision = 0
+
+        self.statuses = {}
+
         self._image_scale_cache = None
         self._tombstone_scale_cache = None
         self._card_back_scale_cache = None
         self._full_heart_scale_cache = None
         self._half_heart_scale_cache = None
+        self._poison_tint_cache = None
+        self._shield_scale_cache = None
 
     def _scaled(self, image, w, h, cache_attr):
         cache = getattr(self, cache_attr)
@@ -121,6 +170,41 @@ class Unit:
         scaled = pygame.transform.smoothscale(image, (w, h))
         setattr(self, cache_attr, ((w, h), scaled))
         return scaled
+
+    def _poison_tinted(self, image):
+        key = (image.get_width(), image.get_height())
+        cache = self._poison_tint_cache
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        tinted = image.copy()
+        tinted.fill((150, 90, 210), special_flags=pygame.BLEND_RGB_MULT)
+        self._poison_tint_cache = (key, tinted)
+        return tinted
+
+    def _scaled_shield(self, w, h):
+        cache = self._shield_scale_cache
+        if cache is not None and cache[0] == (w, h):
+            return cache[1]
+        scaled = pygame.transform.smoothscale(self.shield_image, (w, h))
+        scaled.set_alpha(170)
+        self._shield_scale_cache = ((w, h), scaled)
+        return scaled
+
+    def _draw_weakened(self, surface, image, rect):
+        strip_count = 8
+        strip_h = max(1, rect.height // strip_count)
+        t = self.internal_timer * 0.2
+        amplitude = max(1, rect.width * 0.035)
+
+        y = 0
+        i = 0
+        while y < rect.height:
+            h = min(strip_h, rect.height - y)
+            offset = int(math.sin(t + i * 1.1) * amplitude)
+            strip = image.subsurface(pygame.Rect(0, y, rect.width, h))
+            surface.blit(strip, (rect.x + offset, rect.y + y))
+            y += h
+            i += 1
 
     def get_image(self):
         if self._image is None:
@@ -150,23 +234,43 @@ class Unit:
         rh = max(1, 2 * round(h / 2))
         image = self._scaled(self.get_image(), rw, rh, "_image_scale_cache")
         rect = image.get_rect(center=(x, y))
-        surface.blit(image, rect)
+
+        draw_image = image
+        if self.statuses.get("poison", 0) > 0:
+            draw_image = self._poison_tinted(draw_image)
+
+        if self.statuses.get("weaken", 0) > 0:
+            self._draw_weakened(surface, draw_image, rect)
+        else:
+            surface.blit(draw_image, rect)
+
+        if self.statuses.get("shield", 0) > 0:
+            shield_image = self._scaled_shield(rect.width, rect.height)
+            surface.blit(shield_image, rect)
 
 
         #Back Of Cards
-
         cb_w = max(1, int(size*.75))
         cb_h = max(1, int(size*1))
         card_back_image = self._scaled(self.back_of_card, cb_w, cb_h, "_card_back_scale_cache")
 
-        for i, card in enumerate(self.deck):
+
+        for i, card in enumerate(self.deck[::-1]):
 
             image = card_back_image
             rect = image.get_rect(center=(x, y))
             if not left:
-                rect.centerx = (x+surface.get_width()+i*10)//2 
+                rect.centerx = (x+surface.get_width()+i*25)//2 
             else:
-                rect.centerx = (x-i*10)//2
+                rect.centerx = (x-i*25)//2
+
+
+            #Vision bonus
+            if len(self.deck) - i <= self.vision:
+                image = pygame.transform.scale(card.get_image(), (cb_w, cb_h))
+                surface.blit(image, rect)
+
+
             surface.blit(image, rect)
 
         deck_x = (x - 0) // 2 if left else (x + surface.get_width() + 0) // 2
@@ -188,6 +292,8 @@ class Unit:
             surface.blit(shuffled_image2, rect2)
 
 
+
+        #Used Cards
 
         for i, card in enumerate(self.used_cards):
 
@@ -320,9 +426,61 @@ class Unit:
             self.reshuffle_timer = self.reshuffle_duration
             self.pending_reshuffle_draws = 2
 
+    def add_status(self, status_name, amount=1):
+        if self.is_dead:
+            return
+        self.statuses[status_name] = self.statuses.get(status_name, 0) + amount
+
+    def get_status(self, status_name):
+        return self.statuses.get(status_name, 0)
+
+    def tick_statuses(self, game=None):
+        """Called once at the start of this unit's team's turn."""
+        if self.is_dead:
+            return
+
+        poison = self.statuses.get("poison", 0)
+        if poison > 0:
+            self.take_damage(poison, game, source=None)
+            remaining = self.statuses.get("poison", 0) - 1
+            if remaining <= 0:
+                self.statuses.pop("poison", None)
+            else:
+                self.statuses["poison"] = remaining
+
+        weaken = self.statuses.get("weaken", 0)
+        if weaken > 0:
+            remaining = weaken - 1
+            if remaining <= 0:
+                self.statuses.pop("weaken", None)
+            else:
+                self.statuses["weaken"] = remaining
+
+        shield = self.statuses.get("shield", 0)
+        if shield > 0:
+            remaining = shield - 1
+            if remaining <= 0:
+                self.statuses.pop("shield", None)
+            else:
+                self.statuses["shield"] = remaining
+
+    def _round_to_ten(self, amount):
+        if amount <= 0:
+            return 0
+        return max(10, int((amount + 5) // 10) * 10)
+
     def take_damage(self, amount, game=None, source=None):
         if self.is_dead:
             return
+
+        if self.statuses.get("weaken", 0) > 0:
+            amount = amount * 1.5
+
+        if self.statuses.get("shield", 0) > 0:
+            amount = amount // 2
+
+        amount = self._round_to_ten(amount)
+
         self.health -= amount
         self.flash_timer = 120
         self.damage_amount = amount
@@ -349,6 +507,15 @@ class Unit:
             return
         self.health = min(self.max_health, self.health + amount)
 
+
+    def apply_upgrades(self, extra_heart=0, extra_card=0, glass_cannon=False, vision=0):
+        self.max_health += 20 * extra_heart
+        self.extra_draw_count = extra_card
+        self.vision = vision
+        if glass_cannon:
+            self.glass_cannon = True
+            self.max_health = max(1, int(self.max_health / 2))
+        self.health = self.max_health
 
     def draw_card(self, game=None):
         if self.is_dead:

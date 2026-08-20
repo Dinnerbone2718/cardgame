@@ -108,6 +108,7 @@ class Game:
 
         team = self.player_team if self.turn == "player" else self.enemy_team
         for unit in team:
+            unit.tick_statuses(self)
             unit.trigger_passives(self, Trigger.ON_TURN_START)
 
     def draw(self):

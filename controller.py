@@ -161,6 +161,15 @@ class Controller:
             if effect_name == "HealEffect":
                 results.append((f"HealEffect_{team}", -sign * effect.amount))
 
+            if effect_name == "DamageOrHealSelfEffect":
+                attack_value = effect.damage_amount
+                heal_value = (1 - user.health / user.max_health) * effect.heal_amount
+                results.append((f"DamageOrHealSelfEffect_{team}", max(attack_value, heal_value)))
+
+            if effect_name == "LifestealEffect":
+                heal_value = (1 - user.health / user.max_health) * effect.amount * effect.heal_fraction
+                results.append((f"LifestealEffect_{team}", effect.amount + heal_value))
+
 
         print(f"{user.name}, {card.name} : {sum(value for _, value in results)}")
 
@@ -248,7 +257,7 @@ class Controller:
         index = self.target_index
         for _ in range(len(team)):
             index = (index + delta) % len(team)
-            if not team[index].is_dead:
+            if team[index]:
                 self.target_index = index
                 return
 
@@ -409,6 +418,17 @@ class Controller:
         if not self.targeting or self.pending_stage >= len(self.pending_specs):
             return []
         team_type = self.pending_specs[self.pending_stage]
+
+        if team_type == "enemy_or_self":
+            targets = [unit for unit in self.get_opposing_team() if not unit.is_dead]
+            caster = self.pending_unit
+            if caster is not None and not caster.is_dead:
+                targets.append(caster)
+            return targets
+
+        if team_type == "any":
+            return [unit for unit in self.get_team() + self.get_opposing_team() if not unit.is_dead]
+
         team = self.get_opposing_team() if team_type == "enemy" else self.get_team()
         return [unit for unit in team if not unit.is_dead]
 
@@ -545,7 +565,12 @@ class Controller:
 
     def _card_has_targets(self, card):
         for team_type, _ in card.targeted_effects:
-            pool = self.get_opposing_team() if team_type == "enemy" else self.get_team()
+            if team_type == "enemy_or_self":
+                continue
+            if team_type == "any":
+                pool = self.get_team() + self.get_opposing_team()
+            else:
+                pool = self.get_opposing_team() if team_type == "enemy" else self.get_team()
             if not any(not unit.is_dead for unit in pool):
                 return False
         return True
@@ -566,35 +591,42 @@ class Controller:
             else:
                 targets = []
                 for team_type, effect in card.targeted_effects:
-                    pool = [u for u in (self.get_opposing_team() if team_type == "enemy" else self.get_team()) if not u.is_dead]
-                    if not pool:
-                        pool = [u for u in (self.get_team() if team_type == "enemy" else self.get_opposing_team()) if not u.is_dead]
-                    targets.append(self._choose_ai_target(effect, team_type, pool))
+                    if team_type == "enemy_or_self":
+                        pool = [u for u in self.get_opposing_team() if not u.is_dead]
+                        if unit is not None and not unit.is_dead:
+                            pool.append(unit)
+                    elif team_type == "any":
+                        pool = [u for u in (self.get_team() + self.get_opposing_team()) if not u.is_dead]
+                    else:
+                        pool = [u for u in (self.get_opposing_team() if team_type == "enemy" else self.get_team()) if not u.is_dead]
+                        if not pool:
+                            pool = [u for u in (self.get_team() if team_type == "enemy" else self.get_opposing_team()) if not u.is_dead]
+                    targets.append(self._choose_ai_target(effect, team_type, pool, unit))
                 card.play(self.game, unit, targets=targets)
         else:
             card.play(self.game, unit)
 
         self.pending_end_turn = True
 
-    def _choose_ai_target(self, effect, team_type, pool):
-        """Pick the best target in `pool` for a given targeted effect.
+    def _choose_ai_target(self, effect, team_type, pool, unit=None):
 
-        - Damage aimed at the enemy team: prefer a target that gets knocked
-          out (the lowest-health unit that the damage would kill); if no
-          target can be killed, hit the lowest-health enemy to press the
-          advantage.
-        - Damage aimed at your own team (friendly fire, e.g. explosion's
-          splash): hit your highest-health ally so a weaker unit isn't put
-          at risk of dying.
-        - Heals default to the lowest-health unit in the pool.
-        """
         effect_name = effect.__class__.__name__
+
+        if effect_name == "DamageOrHealSelfEffect":
+            enemies = [u for u in pool if u is not unit]
+            if enemies:
+                killable = [u for u in enemies if u.health <= effect.damage_amount]
+                if killable:
+                    return max(killable, key=lambda u: u.health)
+                if unit is not None and unit.health < unit.max_health * 0.5:
+                    return unit
+                return min(enemies, key=lambda u: u.health)
+            return unit
 
         if effect_name == "DamageEffect":
             if team_type == "enemy":
                 killable = [u for u in pool if u.health <= effect.amount]
                 if killable:
-                    # Least overkill among the units we can finish off.
                     return max(killable, key=lambda u: u.health)
                 return min(pool, key=lambda u: u.health)
             else:
@@ -602,6 +634,15 @@ class Controller:
 
         if effect_name == "HealEffect":
             return min(pool, key=lambda u: u.health)
+
+        if effect_name == "LifestealEffect":
+            enemies = [u for u in pool if u in self.get_opposing_team()]
+            if enemies:
+                killable = [u for u in enemies if u.health <= effect.amount]
+                if killable:
+                    return max(killable, key=lambda u: u.health)
+                return min(enemies, key=lambda u: u.health)
+            return random.choice(pool)
 
         return random.choice(pool)
 

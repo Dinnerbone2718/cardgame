@@ -12,6 +12,13 @@ class MapNode:
         self.connections = set()
         self.visited = False
 
+        self.shop_stock = None
+        self.unit_stock = None
+        self.shop_entered = False
+        self.upgrade_entered = False
+        self.card_entered = False
+        self.fight_config = None
+
     def connect(self, other, bidirectional=False):
         self.connections.add(other)
         if bidirectional:

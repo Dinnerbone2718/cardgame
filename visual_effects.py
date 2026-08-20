@@ -42,7 +42,8 @@ class CardVisualEffect:
 class ProjectileEffect(CardVisualEffect):
     def __init__(self, game, image_path, source_unit, target_unit,
                  duration=0.4, size=140, spin_speed=1440,
-                 impact_text="BOOM!", impact_hold=0.35, trail_length=6):
+                 impact_text="BOOM!", impact_hold=0.35, trail_length=6,
+                   impact_strength = 1, impact_scale = 1):
         super().__init__(duration + impact_hold)
         self.game = game
         self.image = _load_image(image_path)
@@ -51,6 +52,8 @@ class ProjectileEffect(CardVisualEffect):
         self.size = size
         self.spin_speed = spin_speed
         self.impact_text = impact_text
+        self.impact_strength = impact_strength
+        self.impact_scale = impact_scale
 
         self.start_pos = self._unit_pos(source_unit, fallback=(0, 0))
         self.end_pos = self._unit_pos(target_unit, fallback=self.start_pos)
@@ -99,7 +102,7 @@ class ProjectileEffect(CardVisualEffect):
         scale = _scale(self.game)
         t = (self.elapsed - self.fly_duration) / self.impact_hold if self.impact_hold else 1.0
         t = min(1.0, max(0.0, t))
-        wobble = 1 + 0.4 * math.sin(t * math.pi * 10)
+        wobble = 1 + 0.4 * math.sin(t * math.pi * 10 * self.impact_strength) * self.impact_scale
         size = int(self.size * scale * 1.6 * wobble)
         img = pygame.transform.smoothscale(self.image, (max(1, size), max(1, size)))
         rect = img.get_rect(center=self.end_pos)
@@ -325,6 +328,104 @@ class HeartRainEffect(CardVisualEffect):
                 surface.blit(bounced, rect_img)
 
 
+class DrainEffect(CardVisualEffect):
+    def __init__(self, game, source_unit, target_unit, image_path="assets/drain_orb.png",
+                 outbound_duration=0.35, return_duration=0.4, size=90, trail_length=6):
+        super().__init__(outbound_duration + return_duration)
+        self.game = game
+        self.image = _load_image(image_path)
+        self.outbound_duration = outbound_duration
+        self.return_duration = return_duration
+        self.size = size
+        self.trail_length = trail_length
+
+        self.source_pos = self._unit_pos(source_unit, fallback=(0, 0))
+        self.target_pos = self._unit_pos(target_unit, fallback=self.source_pos)
+        self._positions = []
+
+    def _unit_pos(self, unit, fallback):
+        rect = self.game.get_unit_rect(unit)
+        return rect.center if rect else fallback
+
+    def update(self, dt):
+        super().update(dt)
+        self._positions.append(self._current_pos())
+        if len(self._positions) > self.trail_length:
+            self._positions.pop(0)
+
+    def _current_pos(self):
+        if self.elapsed <= self.outbound_duration:
+            t = self.elapsed / self.outbound_duration if self.outbound_duration else 1.0
+            x = self.source_pos[0] + (self.target_pos[0] - self.source_pos[0]) * t
+            y = self.source_pos[1] + (self.target_pos[1] - self.source_pos[1]) * t
+        else:
+            t = (self.elapsed - self.outbound_duration) / self.return_duration if self.return_duration else 1.0
+            t = min(1.0, t)
+            x = self.target_pos[0] + (self.source_pos[0] - self.target_pos[0]) * t
+            y = self.target_pos[1] + (self.source_pos[1] - self.target_pos[1]) * t
+        return x, y
+
+    def draw(self, surface):
+        scale = _scale(self.game)
+        count = max(1, len(self._positions))
+        is_returning = self.elapsed > self.outbound_duration
+        for i, pos in enumerate(self._positions):
+            fade = int(255 * (i + 1) / count)
+            size = int(self.size * scale * (0.5 + 0.5 * (i + 1) / count))
+            img = pygame.transform.smoothscale(self.image, (max(1, size), max(1, size)))
+            if is_returning:
+                img = pygame.transform.flip(img, True, False)
+            img.set_alpha(fade)
+            rect = img.get_rect(center=pos)
+            surface.blit(img, rect)
+
+
+
+
+class SinglePersonEffect(CardVisualEffect):
+    def __init__(self, game, image_path, source_unit, target_unit,
+                 duration=0.4, size=140, growth = 3):
+        
+        super().__init__(duration)
+        self.game = game
+        self.image = _load_image(image_path)
+        self.fly_duration = duration
+        self.size = size
+        self.growth = growth
+        self.target_unit = target_unit
+
+
+
+    def update(self, dt):
+        super().update(dt)
+
+
+    def draw(self, surface):
+        rect = self.game.get_unit_rect(self.target_unit)
+        if not rect:
+            return
+
+        scale = _scale(self.game)
+        t = min(1.0, self.elapsed / self.fly_duration) if self.fly_duration else 1.0
+
+        grow_t = t ** (1.0 / self.growth) if self.growth else t
+        size = max(1, int(self.size * scale * grow_t))
+
+        img = pygame.transform.smoothscale(self.image, (size, size))
+
+        alpha = int(255 * min(1.0, grow_t * 3) * min(1.0, (1.0 - t) * 3 + (1.0 if t < 0.7 else 0)))
+        alpha = max(0, min(255, alpha))
+        img.set_alpha(alpha)
+
+        img_rect = img.get_rect(center=rect.center)
+        surface.blit(img, img_rect)
+
+    def _current_pos(self, surface):
+        return (self.elapsed / (.5*self.fly_duration))**self.growth * (surface.get_height()/2) + (surface.get_height()/2)
+
+
+
+
 CARD_VISUAL_EFFECTS = {
     "explosion": lambda game, source, target: ProjectileEffect(
         game, "assets/fireball.png", source, target,
@@ -347,9 +448,35 @@ CARD_VISUAL_EFFECTS = {
     ),    
     "hospital": lambda game, source, target: HealAllEffect(
         game
-    )
-    
+    ),
+
+    "fartman": lambda game, source, target: ProjectileEffect(
+        game, "assets/smelly.png", source, target,
+        duration=2, size=140, spin_speed=100, impact_text="SMELLY", impact_hold=1, impact_strength=.2, impact_scale = .2
+    ),
+
+
+    "field": lambda game, source, target: ProjectileEffect(
+        game, "assets/tractor.png", source, target,
+        duration=3, size=140, spin_speed=0, impact_hold=0
+    ),
+
+    "disk": lambda game, source, target: RainEffect(
+        game, "assets/disk.png", source, target,
+        duration=1, size=140, spin_speed=100, impact_hold=0, trail_length=1,  show_impact_text= False
+    ),
+    "dragon": lambda game, source, target: SinglePersonEffect(
+        game, "assets/dragon.png", source, target,
+        duration=1.4, size=440, growth = 3
+    ),
+    "carder": lambda game, source, target: RainEffect(
+        game, "assets/card.png", source, target,
+        duration=1.5, size=180, spin_speed = 0, impact_hold=0, trail_length=2, drop_count = 30
+    ),    
+
+
 }
+
 
 
 def spawn_card_effect(game, card_name, source_unit, target_unit):

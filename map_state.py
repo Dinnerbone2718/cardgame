@@ -3,6 +3,7 @@ import pygame
 import random
 
 from map_node import MapNode
+from units import ENEMY_UNIT_POOL, UNIT_POWER
 
 
 NODE_IMAGE_FILES = {
@@ -22,26 +23,66 @@ BG_COLOR = (24, 22, 30)
 
 FIGHT_NODE_TYPES = ("combat", "boss")
 
-
-FIGHT_CONFIGS = {
-    "combat": {"difficulty": 2, "enemy_team": ["nevada", "nevada", "demon", "demon"]},
-    "combat": {"difficulty": 3, "enemy_team": ["frog", "frog", "nevada", "nevada"]},
-    "combat": {"difficulty": 4, "enemy_team": ["spacecat", "spacecat", "frog", "frog"]},
-    "combat": {"difficulty": 1, "enemy_team": ["demon", "demon", "demon", "demon"]},
-
-    "boss": {"difficulty": 3, "enemy_team": ["demon", "demon", "demon", "demon"]},
-}
-DEFAULT_FIGHT_CONFIG = FIGHT_CONFIGS["combat"]
-
 FIGHT_CONFIG_OVERRIDES = {}
+
+ENEMY_TEAM_SIZE = 4
+DIFFICULTY_LEVELS = 5
+
+MIN_POWER_BUDGET = ENEMY_TEAM_SIZE * min(UNIT_POWER.values())
+MAX_POWER_BUDGET = ENEMY_TEAM_SIZE * (sum(UNIT_POWER.values()) / len(UNIT_POWER))
+BOSS_POWER_BONUS = ENEMY_TEAM_SIZE * 2
+
+CANDIDATE_POOL_SIZE = 3
+
+
+def _progress_for_node(node):
+    return min(1.0, max(0.0, node.x))
+
+
+def _difficulty_for_progress(progress, is_boss):
+    difficulty = 1 + round(progress * (DIFFICULTY_LEVELS - 1))
+    if is_boss:
+        difficulty += 1
+    return max(1, min(DIFFICULTY_LEVELS, difficulty))
+
+
+def _generate_enemy_team(progress, is_boss=False):
+    budget = MIN_POWER_BUDGET + (MAX_POWER_BUDGET - MIN_POWER_BUDGET) * progress
+    if is_boss:
+        budget += BOSS_POWER_BONUS
+
+    team = []
+    remaining = budget
+
+    for i in range(ENEMY_TEAM_SIZE):
+        slots_left = ENEMY_TEAM_SIZE - i
+        target = remaining / slots_left
+        ranked = sorted(ENEMY_UNIT_POOL, key=lambda name: abs(UNIT_POWER[name] - target))
+        chosen = random.choice(ranked[:CANDIDATE_POOL_SIZE])
+        team.append(chosen)
+        remaining -= UNIT_POWER[chosen]
+
+    return team
 
 
 def get_fight_config(node):
-    return FIGHT_CONFIG_OVERRIDES.get(node.id, FIGHT_CONFIGS.get(node.node_type, DEFAULT_FIGHT_CONFIG))
+    override = FIGHT_CONFIG_OVERRIDES.get(node.id)
+    if override is not None:
+        return override
+
+    if node.fight_config is None:
+        progress = _progress_for_node(node)
+        is_boss = node.node_type == "boss"
+        node.fight_config = {
+            "difficulty": _difficulty_for_progress(progress, is_boss),
+            "enemy_team": _generate_enemy_team(progress, is_boss=is_boss),
+        }
+
+    return node.fight_config
 
 
 def get_fight_difficulty(node):
-    return get_fight_config(node).get("difficulty", DEFAULT_FIGHT_CONFIG["difficulty"])
+    return get_fight_config(node).get("difficulty", 1)
 
 
 MAP_ZOOM = 1.6
@@ -54,15 +95,19 @@ HINT_FADE = 1.0
 
 
 class MapState:
-    def __init__(self, screen, nodes, start_node, zoom=MAP_ZOOM, on_combat_start=None, on_deck_button_click=None):
+    def __init__(self, screen, nodes, start_node, player_state, zoom=MAP_ZOOM, on_combat_start=None, on_deck_button_click=None, on_shop_enter=None, on_upgrade_enter=None, on_card_enter=None):
         self.screen = screen
         self.nodes = nodes
         self.current_node = start_node
         self.current_node.visited = True
 
+        self.player_state = player_state
 
         self.on_combat_start = on_combat_start
         self.on_deck_button_click = on_deck_button_click
+        self.on_shop_enter = on_shop_enter
+        self.on_upgrade_enter = on_upgrade_enter
+        self.on_card_enter = on_card_enter
 
         self._images = {
             node_type: pygame.image.load(path).convert_alpha()
@@ -76,10 +121,21 @@ class MapState:
         self._full_heart_image = pygame.image.load("assets/full_heart.png").convert_alpha()
         self._fight_button_image = pygame.image.load("assets/fight.png").convert_alpha()
         self._deck_button_image = pygame.image.load("assets/deck.png").convert_alpha()
+        self._coin_image = pygame.image.load("assets/coin.png").convert_alpha()
+        self._enter_button_image = pygame.image.load("assets/enter.png").convert_alpha()
 
         self._fight_box_rect = None
         self._fight_button_rect = None
         self._deck_button_rect = None
+
+        self._shop_box_rect = None
+        self._shop_button_rect = None
+
+        self._upgrade_box_rect = None
+        self._upgrade_button_rect = None
+
+        self._card_box_rect = None
+        self._card_button_rect = None
 
         self._node_rects = {}
         self._bob_timer = 0.0
@@ -89,6 +145,9 @@ class MapState:
         self._enemy_icon_cache = {}
 
         self.pending_fight_node = None
+        self.pending_shop_node = None
+        self.pending_upgrade_node = None
+        self.pending_card_node = None
 
         self.zoom = zoom
 
@@ -158,8 +217,15 @@ class MapState:
                 return
 
             clicked_node = self._handle_node_click(pos)
-            if not clicked_node and self.pending_fight_node is not None:
-                self._handle_fight_prompt_click(pos)
+            if not clicked_node:
+                if self.pending_fight_node is not None:
+                    self._handle_fight_prompt_click(pos)
+                elif self.pending_shop_node is not None:
+                    self._handle_shop_prompt_click(pos)
+                elif self.pending_upgrade_node is not None:
+                    self._handle_upgrade_prompt_click(pos)
+                elif self.pending_card_node is not None:
+                    self._handle_card_prompt_click(pos)
 
         self._mouse_down_pos = None
         self._dragging = False
@@ -174,9 +240,30 @@ class MapState:
                 return True
 
             if self._is_fight_node(node):
+                self.pending_shop_node = None
+                self.pending_upgrade_node = None
+                self.pending_card_node = None
                 self.pending_fight_node = node
+            elif self._is_shop_node(node):
+                self.pending_fight_node = None
+                self.pending_upgrade_node = None
+                self.pending_card_node = None
+                self.pending_shop_node = node
+            elif self._is_upgrade_node(node):
+                self.pending_fight_node = None
+                self.pending_shop_node = None
+                self.pending_card_node = None
+                self.pending_upgrade_node = node
+            elif self._is_card_node(node):
+                self.pending_fight_node = None
+                self.pending_shop_node = None
+                self.pending_upgrade_node = None
+                self.pending_card_node = node
             else:
                 self.pending_fight_node = None
+                self.pending_shop_node = None
+                self.pending_upgrade_node = None
+                self.pending_card_node = None
                 self._travel_to(node)
             return True
         return False
@@ -193,11 +280,56 @@ class MapState:
         self._fight_button_rect = None
         self._fight_box_rect = None
 
+    def _handle_shop_prompt_click(self, pos):
+        if self._shop_button_rect is not None and self._shop_button_rect.collidepoint(pos):
+            self._enter_shop(self.pending_shop_node)
+            return
+
+        if self._shop_box_rect is not None and self._shop_box_rect.collidepoint(pos):
+            return
+
+        self.pending_shop_node = None
+        self._shop_button_rect = None
+        self._shop_box_rect = None
+
+    def _handle_upgrade_prompt_click(self, pos):
+        if self._upgrade_button_rect is not None and self._upgrade_button_rect.collidepoint(pos):
+            self._enter_upgrade(self.pending_upgrade_node)
+            return
+
+        if self._upgrade_box_rect is not None and self._upgrade_box_rect.collidepoint(pos):
+            return
+
+        self.pending_upgrade_node = None
+        self._upgrade_button_rect = None
+        self._upgrade_box_rect = None
+
+    def _handle_card_prompt_click(self, pos):
+        if self._card_button_rect is not None and self._card_button_rect.collidepoint(pos):
+            self._enter_card(self.pending_card_node)
+            return
+
+        if self._card_box_rect is not None and self._card_box_rect.collidepoint(pos):
+            return
+
+        self.pending_card_node = None
+        self._card_button_rect = None
+        self._card_box_rect = None
+
     def _is_reachable(self, node):
         return node in self.current_node.connections
 
     def _is_fight_node(self, node):
         return node.node_type in FIGHT_NODE_TYPES
+
+    def _is_shop_node(self, node):
+        return node.node_type == "shop" and not node.shop_entered
+
+    def _is_upgrade_node(self, node):
+        return node.node_type == "upgrade" and not node.upgrade_entered
+
+    def _is_card_node(self, node):
+        return node.node_type == "card" and not node.card_entered
 
     def _enter_combat(self, node):
         self.pending_fight_node = None
@@ -206,6 +338,33 @@ class MapState:
         self._travel_to(node)
         if self.on_combat_start is not None:
             self.on_combat_start(node)
+
+    def _enter_shop(self, node):
+        self.pending_shop_node = None
+        self._shop_button_rect = None
+        self._shop_box_rect = None
+        node.shop_entered = True
+        self._travel_to(node)
+        if self.on_shop_enter is not None:
+            self.on_shop_enter(node)
+
+    def _enter_upgrade(self, node):
+        self.pending_upgrade_node = None
+        self._upgrade_button_rect = None
+        self._upgrade_box_rect = None
+        node.upgrade_entered = True
+        self._travel_to(node)
+        if self.on_upgrade_enter is not None:
+            self.on_upgrade_enter(node)
+
+    def _enter_card(self, node):
+        self.pending_card_node = None
+        self._card_button_rect = None
+        self._card_box_rect = None
+        node.card_entered = True
+        self._travel_to(node)
+        if self.on_card_enter is not None:
+            self.on_card_enter(node)
 
     def _travel_to(self, node):
         self.current_node = node
@@ -224,7 +383,11 @@ class MapState:
         self._draw_hand(surface)
         self._draw_hint(surface)
         self._draw_fight_prompt(surface)
+        self._draw_shop_prompt(surface)
+        self._draw_upgrade_prompt(surface)
+        self._draw_card_prompt(surface)
         self._draw_deck_button(surface)
+        self._draw_coin_counter(surface)
 
     def _draw_deck_button(self, surface):
         width = int(self.screen.width * 0.16)
@@ -233,6 +396,18 @@ class MapState:
         rect = scaled.get_rect(topleft=(16, 16))
         surface.blit(scaled, rect)
         self._deck_button_rect = rect
+
+    def _draw_coin_counter(self, surface):
+        if self._font is None:
+            self._font = pygame.font.SysFont("comicsansms", max(16, int(self.screen.height * 0.07)))
+
+        coin_size = int(self.screen.height * 0.05)
+        coin_image = pygame.transform.smoothscale(self._coin_image, (coin_size, coin_size))
+        coin_rect = coin_image.get_rect(topright=(self.screen.width - 24, 24))
+        surface.blit(coin_image, coin_rect)
+
+        text_surf = self._font.render(str(self.player_state.coins), True, (255, 215, 80))
+        surface.blit(text_surf, text_surf.get_rect(midright=(coin_rect.left - 8, coin_rect.centery)))
 
     def _to_screen(self, x, y):
         world_w, world_h = self._world_size()
@@ -396,6 +571,143 @@ class MapState:
         surface.blit(button_image, button_rect)
 
         self._fight_button_rect = button_rect
+
+
+    def _draw_shop_prompt(self, surface):
+        node = self.pending_shop_node
+        if node is None:
+            return
+
+        node_rect = self._node_rects.get(node)
+        if node_rect is None:
+            return
+
+        box_height = int(self.screen.height * 0.16)
+        box_width = int(box_height * 1.6)
+        box_image = pygame.transform.smoothscale(self._box_image, (box_width, box_height))
+
+        margin = 10
+        gap = int(node_rect.height * 0.15)
+        space_above = node_rect.top - gap
+
+        if space_above >= box_height + margin:
+            box_rect = box_image.get_rect(midbottom=(node_rect.centerx, node_rect.top - gap))
+        else:
+            box_rect = box_image.get_rect(midtop=(node_rect.centerx, node_rect.bottom + gap))
+
+        self._clamp_rect_to_screen(box_rect)
+
+        surface.blit(box_image, box_rect)
+        self._shop_box_rect = box_rect
+
+        self._draw_shop_button(surface, box_rect)
+
+    def _draw_shop_button(self, surface, box_rect):
+        button_width = int(box_rect.width * 0.8)
+        native_w, native_h = self._enter_button_image.get_size()
+        button_height = int(button_width * (native_h / native_w)) if native_w else button_width
+
+        button_image = pygame.transform.smoothscale(self._enter_button_image, (button_width, button_height))
+        button_rect = button_image.get_rect(center=box_rect.center)
+
+        if button_rect.collidepoint(self._mouse_pos):
+            button_image = button_image.copy()
+            button_image.fill((45, 45, 45, 0), special_flags=pygame.BLEND_RGB_ADD)
+
+        surface.blit(button_image, button_rect)
+
+        self._shop_button_rect = button_rect
+
+
+    def _draw_upgrade_prompt(self, surface):
+        node = self.pending_upgrade_node
+        if node is None:
+            return
+
+        node_rect = self._node_rects.get(node)
+        if node_rect is None:
+            return
+
+        box_height = int(self.screen.height * 0.16)
+        box_width = int(box_height * 1.6)
+        box_image = pygame.transform.smoothscale(self._box_image, (box_width, box_height))
+
+        margin = 10
+        gap = int(node_rect.height * 0.15)
+        space_above = node_rect.top - gap
+
+        if space_above >= box_height + margin:
+            box_rect = box_image.get_rect(midbottom=(node_rect.centerx, node_rect.top - gap))
+        else:
+            box_rect = box_image.get_rect(midtop=(node_rect.centerx, node_rect.bottom + gap))
+
+        self._clamp_rect_to_screen(box_rect)
+
+        surface.blit(box_image, box_rect)
+        self._upgrade_box_rect = box_rect
+
+        self._draw_upgrade_button(surface, box_rect)
+
+    def _draw_upgrade_button(self, surface, box_rect):
+        button_width = int(box_rect.width * 0.8)
+        native_w, native_h = self._enter_button_image.get_size()
+        button_height = int(button_width * (native_h / native_w)) if native_w else button_width
+
+        button_image = pygame.transform.smoothscale(self._enter_button_image, (button_width, button_height))
+        button_rect = button_image.get_rect(center=box_rect.center)
+
+        if button_rect.collidepoint(self._mouse_pos):
+            button_image = button_image.copy()
+            button_image.fill((45, 45, 45, 0), special_flags=pygame.BLEND_RGB_ADD)
+
+        surface.blit(button_image, button_rect)
+
+        self._upgrade_button_rect = button_rect
+
+    def _draw_card_prompt(self, surface):
+        node = self.pending_card_node
+        if node is None:
+            return
+
+        node_rect = self._node_rects.get(node)
+        if node_rect is None:
+            return
+
+        box_height = int(self.screen.height * 0.16)
+        box_width = int(box_height * 1.6)
+        box_image = pygame.transform.smoothscale(self._box_image, (box_width, box_height))
+
+        margin = 10
+        gap = int(node_rect.height * 0.15)
+        space_above = node_rect.top - gap
+
+        if space_above >= box_height + margin:
+            box_rect = box_image.get_rect(midbottom=(node_rect.centerx, node_rect.top - gap))
+        else:
+            box_rect = box_image.get_rect(midtop=(node_rect.centerx, node_rect.bottom + gap))
+
+        self._clamp_rect_to_screen(box_rect)
+
+        surface.blit(box_image, box_rect)
+        self._card_box_rect = box_rect
+
+        self._draw_card_button(surface, box_rect)
+
+    def _draw_card_button(self, surface, box_rect):
+        button_width = int(box_rect.width * 0.8)
+        native_w, native_h = self._enter_button_image.get_size()
+        button_height = int(button_width * (native_h / native_w)) if native_w else button_width
+
+        button_image = pygame.transform.smoothscale(self._enter_button_image, (button_width, button_height))
+        button_rect = button_image.get_rect(center=box_rect.center)
+
+        if button_rect.collidepoint(self._mouse_pos):
+            button_image = button_image.copy()
+            button_image.fill((45, 45, 45, 0), special_flags=pygame.BLEND_RGB_ADD)
+
+        surface.blit(button_image, button_rect)
+
+        self._card_button_rect = button_rect
 
 
 def gen_map(screen, seed, zoom=MAP_ZOOM):
@@ -746,15 +1058,15 @@ def build_example_map(screen):
     start = MapNode("card", col_x(0, 7), h * 0.5)
 
     n1 = MapNode("combat", col_x(1, 7), h * 0.3)
-    n1b = MapNode("combat", col_x(1, 7), h * 0.75)
+    n1b = MapNode("upgrade", col_x(1, 7), h * 0.75)
 
     n2a = MapNode("card", col_x(2, 7), h * 0.18)
     n2b = MapNode("shop", col_x(2, 7), h * 0.45)
     n2c = MapNode("upgrade", col_x(2, 7), h * 0.82)
 
-    n3a = MapNode("combat", col_x(3, 7), h * 0.18)
-    n3b = MapNode("combat", col_x(3, 7), h * 0.45)
-    n3c = MapNode("combat", col_x(3, 7), h * 0.82)
+    n3a = MapNode("upgrade", col_x(3, 7), h * 0.18)
+    n3b = MapNode("upgrade", col_x(3, 7), h * 0.45)
+    n3c = MapNode("upgrade", col_x(3, 7), h * 0.82)
 
     n4a = MapNode("upgrade", col_x(4, 7), h * 0.18)
     n4b = MapNode("card", col_x(4, 7), h * 0.45)
