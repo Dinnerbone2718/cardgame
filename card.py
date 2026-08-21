@@ -3,6 +3,7 @@ import pygame
 from effects import (
     ApplyStatusTeamEffect,
     Cost,
+    DamageByDiscardEffect,
     DamageEffect,
     DrawAllEffect,
     HealEffect,
@@ -23,7 +24,7 @@ from effects import (
 from visual_effects import spawn_card_effect
 
 
-CARD_NAMES = ["explosion", "field", "hospital", "lazer", "ace", "disk", "carder", "cuck", "dragon", "horse", "fartman", "donghuahorse", "cuck_friendship", "fox", "yogurt", "marmalade_peanut", "blorpit", "gronkle", "shield", "genuis"]
+CARD_NAMES = ["explosion", "field", "hospital", "lazer", "ace", "disk", "carder", "cuck", "dragon", "horse", "fartman", "donghuahorse", "cuck_friendship", "fox", "yogurt", "marmalade_peanut", "blorpit", "gronkle", "shield", "genius"]
 
 
 def create_card(name):
@@ -158,10 +159,11 @@ _CARD_BUILDERS = {
     ),
 
 
-    "genuis": lambda: TurnCard(
-        name="genuis",
-        #Effect should do 10 damage per card in the discard pile of that unit.
-        power = 4,
+    "genius": lambda: TurnCard(
+        name="genius",
+        requires_target=True,
+        targeted_effects=[("enemy", DamageByDiscardEffect(10))],
+        power=4,
     ),
 
     #Later Game Upgrades

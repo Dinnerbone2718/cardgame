@@ -30,7 +30,7 @@ DEFAULT_CARD_POOL = {
     "blorpit": 10,
     "gronkle": 10,
     "shield": 10,
-    "genuis": 10
+    "genius": 10
 }
 
 

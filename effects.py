@@ -229,3 +229,20 @@ class SelfDiscardCost(Cost):
         for _ in range(self.amount):
             if player.hand:
                 player.hand.pop(0)
+
+
+
+
+
+class DamageByDiscardEffect(DamageEffect):
+
+    def __init__(self, amount_per_card):
+        super().__init__(amount_per_card)
+        self.amount_per_card = amount_per_card
+
+    def apply(self, game, player, source, target):
+        discard_count = len(getattr(source, "used_cards", None) or [])
+        amount = self.amount_per_card * discard_count
+        if source is not None and getattr(source, "glass_cannon", False):
+            amount *= 2
+        target.take_damage(amount, game, source)
